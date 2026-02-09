@@ -1,0 +1,9 @@
+.git
+.gitignore
+.DS_Store
+*.md
+install.sh.bak
+deploy-custom.sh
+.dockerignore
+OPTIMIZATION_GUIDE.md
+README.md
