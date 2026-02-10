@@ -75,7 +75,15 @@ process_update() {
       ;;
     "/users"|"users")
       # gather IPs from ss and xray access.log (if exists), count occurrences
-      CONN_IPS=$(ss -ntu 2>/dev/null | awk '{print $5}' | sed -E 's/\[[^]]+\]://g' | sed -E 's/:.*$//g' | grep -E '^[0-9]+' || true)
+      # detect listener (if any) and filter connections by its process name when possible
+      LIST_LINE=$(ss -ltnp '( sport = :443 )' 2>/dev/null | tail -n +2 | head -n1 || true)
+      if echo "$LIST_LINE" | grep -qiE 'nginx|haproxy|caddy|xray|traefik|envoy'; then
+        LISTENER=$(echo "$LIST_LINE" | grep -oEi 'nginx|haproxy|caddy|xray|traefik|envoy' | head -n1)
+        CONN_IPS=$(ss -4ntp state established '( sport = :443 or dport = :443 )' 2>/dev/null | grep -i "$LISTENER" || true)
+      else
+        CONN_IPS=$(ss -4nt state established '( sport = :443 or dport = :443 )' 2>/dev/null | tail -n +2 || true)
+      fi
+      CONN_IPS=$(echo "$CONN_IPS" | awk '{print $5}' | sed -E 's/\[[^]]+\]://g' | sed -E 's/:.*$//g' | grep -E '^[0-9]+' || true)
       LOG_IPS=$(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' /var/log/xray/access.log 2>/dev/null || true)
       ALL_IPS=$(printf "%s\n%s\n" "$CONN_IPS" "$LOG_IPS" | sed '/^$/d')
       if [ -z "$ALL_IPS" ]; then

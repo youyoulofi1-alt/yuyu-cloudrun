@@ -24,15 +24,28 @@ send_telegram() {
 IP=$(curl -s --max-time 5 https://ifconfig.me || echo "unknown")
 UPTIME=$(uptime -p 2>/dev/null || echo "unknown")
 
-# Connected users: try ss on port 443, fallback to xray access log
+# Connected users: detect listener process on :443 and count ESTABLISHED sessions for that process, fallback to xray access log
 CONNECTED="0"
+LISTENER=""
 if command -v ss >/dev/null 2>&1; then
-  CONNECTED=$(ss -ntu | grep ":443" | wc -l | tr -d '[:space:]' || echo 0)
+  # try to detect common listener names in ss output (nginx, haproxy, caddy, xray, traefik, envoy)
+  LIST_LINE=$(ss -ltnp '( sport = :443 )' 2>/dev/null | tail -n +2 | head -n1 || true)
+  if echo "$LIST_LINE" | grep -qiE 'nginx|haproxy|caddy|xray|traefik|envoy'; then
+    LISTENER=$(echo "$LIST_LINE" | grep -oEi 'nginx|haproxy|caddy|xray|traefik|envoy' | head -n1 | tr '[:upper:]' '[:lower:]')
+  fi
+
+  if [ -n "$LISTENER" ]; then
+    # count established connections associated with the listener process
+    CONNECTED=$(ss -4ntp state established '( sport = :443 or dport = :443 )' 2>/dev/null | grep -i "$LISTENER" || true)
+    CONNECTED=$(echo "$CONNECTED" | wc -l | tr -d '[:space:]' || echo 0)
+  else
+    CONNECTED=$(ss -4nt state established '( sport = :443 or dport = :443 )' 2>/dev/null | tail -n +2 | wc -l | tr -d '[:space:]' || echo 0)
+  fi
 fi
 
-# If /var/log/xray/access.log exists, prefer counting "accepted"
+# If /var/log/xray/access.log exists, prefer counting "accepted" or "upgraded"
 if [ -f "/var/log/xray/access.log" ]; then
-  LOG_CONN=$(grep -c "accepted" /var/log/xray/access.log || true)
+  LOG_CONN=$(grep -c -E "accepted|upgraded" /var/log/xray/access.log || true)
   if [ -n "$LOG_CONN" ] && [ "$LOG_CONN" -gt 0 ]; then
     CONNECTED="$LOG_CONN"
   fi
