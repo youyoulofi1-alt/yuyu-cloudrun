@@ -1,0 +1,14 @@
+[Unit]
+Description=Yuyu Telegram Bot Listener
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/yuyu_bot
+ExecStart=/usr/local/bin/bot_listener.sh
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

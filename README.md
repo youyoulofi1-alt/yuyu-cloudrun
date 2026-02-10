@@ -23,7 +23,7 @@ Deploy Xray-core on Google Cloud Run with WebSocket + TLS.
 
 ```bash
 git clone https://github.com/youyoulofi1-alt/yuyu-cloudrun.git
-cd youyoulofi1-alt
+cd yuyu-cloudrun
 chmod +x install.sh
 ./install.sh
 # سيطلب منك الإعدادات تدريجياً - يمكنك الضغط Enter للتخطي
@@ -145,3 +145,71 @@ Memory: 2048MB | CPU: 2 | Instances: 8 | Concurrency: 1000
 - ابدأ بإعدادات صغيرة وزد حسب الحاجة
 - استخدم VLESS لأداء أفضل من VMESS
 - راقب استخدام الموارد والتكاليف بانتظام
+
+---
+
+## 🤖 Bot Telegram — سكربتات Bash (اختصار)
+
+هذا المشروع يتضمن سكربتات Bash لاستخدام Bot Telegram عبر polling (بدون webhook). الميزات الأساسية:
+
+- إرسال حالة السيرفر (`status.sh`) إلى `CHAT_ID` المحدد
+- الاستماع لأوامر (`bot_listener.sh`) عبر `getUpdates` (commands: `update`, `users`, `restart`, `reboot`)
+- إمكانية تشغيل المستمع كخدمة systemd باستخدام ملف القالب `systemd/bot-listener.service`
+
+الملفات المضافة:
+
+- `scripts/status.sh` — يرسل ملخّص الحالة (IP, uptime, connected)
+- `scripts/bot_listener.sh` — يستعلم `getUpdates` ويستجيب للأوامر
+- `systemd/bot-listener.service` — قالب خدمة systemd
+
+التثبيت السريع:
+
+1. انسخ السكربتات إلى `/usr/local/bin` ومنحها صلاحيات تنفيذ:
+
+```bash
+sudo cp scripts/status.sh scripts/bot_listener.sh /usr/local/bin/
+sudo chmod +x /usr/local/bin/status.sh /usr/local/bin/bot_listener.sh
+```
+
+2. أنشئ ملف البيئة `/etc/default/yuyu_bot` وضع فيه:
+
+```bash
+# /etc/default/yuyu_bot
+BOT_TOKEN="put_bot_token_here"
+CHAT_ID="CHATI_D"
+# اختياري: أمر لإعادة تشغيل الخدمة التي تريدها عند استقبال restart
+SERVICE_RESTART_CMD="systemctl restart xray"
+```
+
+3. تثبيت jq إذا لم يكن مثبتًا:
+
+```bash
+# Debian/Ubuntu
+sudo apt update && sudo apt install -y jq
+# RHEL/CentOS
+sudo yum install -y epel-release && sudo yum install -y jq
+```
+
+4. إنشاء وتفعيل خدمة systemd:
+
+```bash
+sudo cp systemd/bot-listener.service /etc/systemd/system/bot-listener.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now bot-listener.service
+```
+
+5. اختبار يدوياً:
+
+```bash
+# أرسل حالة الآن
+sudo BOT_TOKEN="$BOT_TOKEN" CHAT_ID="$CHAT_ID" /usr/local/bin/status.sh
+# أو شغّل المستمع مؤقتًا (بدون systemd)
+sudo BOT_TOKEN="$BOT_TOKEN" CHAT_ID="$CHAT_ID" /usr/local/bin/bot_listener.sh
+```
+
+أمان:
+
+- لا تقم بنشر `BOT_TOKEN` علنًا. إذا تسرب التوكن، أعد إصداره عبر @BotFather فورًا.
+- يُوصى تشغيل `bot_listener.sh` كخدمة واحدة على الخادم لتجنّب استلام التحديثات مكررة.
+
+هل تريد أن أضبط السكربتات لتدعم مزايا إضافية (أزرار، تحقق إضافي، تفصيل اتصالات UUID)؟
