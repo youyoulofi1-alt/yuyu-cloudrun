@@ -1,93 +1,134 @@
-#!/bin/bash
-# bot_listener.sh - poll Telegram getUpdates and react to commands
-# Requires: BOT_TOKEN, CHAT_ID (authorized chat id), optional SERVICE_RESTART_CMD
+#!/usr/bin/env bash
+# bot_listener.sh - robust Telegram polling listener
+# Polling interval: configurable (default 60s)
+# Requirements: BOT_TOKEN, CHAT_ID, jq
 
-set -eu
+set -euo pipefail
 
 BOT_TOKEN=${BOT_TOKEN:-}
 AUTHORIZED_CHAT_ID=${CHAT_ID:-}
-LAST_ID_FILE=${LAST_ID_FILE:-/var/tmp/yuyu_bot_last_id}
-POLL_TIMEOUT=${POLL_TIMEOUT:-30}
+POLL_INTERVAL=${POLL_INTERVAL:-60}    # seconds between polling cycles
+POLL_TIMEOUT=${POLL_TIMEOUT:-60}      # long polling timeout for getUpdates
+LAST_ID_FILE=${LAST_ID_FILE:-/var/lib/yuyu_bot/last_update_id}
 SERVICE_RESTART_CMD=${SERVICE_RESTART_CMD:-}
+ALLOW_REBOOT=${ALLOW_REBOOT:-no}      # set to "yes" to allow reboot
 
+LOG_PREFIX="[bot_listener]"
+
+# minimal sanity checks
 if [ -z "$BOT_TOKEN" ] || [ -z "$AUTHORIZED_CHAT_ID" ]; then
-  echo "BOT_TOKEN and CHAT_ID must be set in environment"
+  echo "$LOG_PREFIX BOT_TOKEN and CHAT_ID must be set in environment"
   exit 1
 fi
 
 if ! command -v jq >/dev/null 2>&1; then
-  echo "jq is required but not installed. Install it (apt/yum) and retry."
+  echo "$LOG_PREFIX jq is required but not installed. Install it and retry."
   exit 1
 fi
 
-# Ensure last id file exists
+# ensure last id directory exists and is writable
 mkdir -p "$(dirname "$LAST_ID_FILE")"
 if [ ! -f "$LAST_ID_FILE" ]; then
   echo 0 > "$LAST_ID_FILE"
 fi
 
-echo "[bot_listener] starting loop (poll timeout ${POLL_TIMEOUT}s)"
-while true; do
-  OFFSET=$(cat "$LAST_ID_FILE" 2>/dev/null || echo 0)
-  RESP=$(curl -s --max-time $((POLL_TIMEOUT+5)) "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?timeout=${POLL_TIMEOUT}&offset=${OFFSET}")
+send_message() {
+  local chat="$1"; shift
+  local text="$*"
+  curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+    -d chat_id="${chat}" \
+    --data-urlencode "text=${text}" \
+    -d "parse_mode=HTML" >/dev/null 2>&1 || true
+}
 
-  has=$(echo "$RESP" | jq '.result | length')
-  if [ "$has" = "0" ]; then
-    continue
+process_update() {
+  local upd_json="$1"
+  local update_id
+  update_id=$(echo "$upd_json" | jq '.update_id')
+  local text
+  text=$(echo "$upd_json" | jq -r '.message.text // empty' | tr -d '\r')
+  local chat_id
+  chat_id=$(echo "$upd_json" | jq -r '.message.chat.id | tostring')
+
+  # only process authorized chat
+  if [ "$chat_id" != "$AUTHORIZED_CHAT_ID" ]; then
+    echo "$LOG_PREFIX ignoring chat $chat_id"
+    echo $((update_id + 1)) > "$LAST_ID_FILE"
+    return
   fi
 
-  # iterate updates
-  echo "$RESP" | jq -c '.result[]' | while read -r upd; do
-    update_id=$(echo "$upd" | jq '.update_id')
-    text=$(echo "$upd" | jq -r '.message.text // empty' | tr -d '\r')
-    chat_id=$(echo "$upd" | jq -r '.message.chat.id | tostring')
+  echo "$LOG_PREFIX got command from $chat_id: '$text'"
 
-    # ignore if from other chat
-    if [ "$chat_id" != "${AUTHORIZED_CHAT_ID}" ]; then
-      echo "[bot_listener] ignoring chat $chat_id"
-      # still update offset
-      echo $((update_id+1)) > "$LAST_ID_FILE"
+  case "${text,,}" in
+    "/update"|"update"|"/status"|"status")
+      /bin/bash "$(dirname "$0")/status.sh" || true
+      ;;
+    "/users"|"users")
+      USERS=$(ss -ntu | grep ":443" || true)
+      if [ -z "$USERS" ]; then
+        SEND_TEXT="No active TCP connections on :443"
+      else
+        SEND_TEXT="Active connections on :443:\n$(echo "$USERS" | head -n 30)"
+      fi
+      send_message "$AUTHORIZED_CHAT_ID" "$SEND_TEXT"
+      ;;
+    "/restart"|"restart")
+      if [ -n "$SERVICE_RESTART_CMD" ]; then
+        if /bin/bash -c "$SERVICE_RESTART_CMD" >/dev/null 2>&1; then
+          send_message "$AUTHORIZED_CHAT_ID" "Restart command executed"
+        else
+          send_message "$AUTHORIZED_CHAT_ID" "Restart command failed"
+        fi
+      else
+        send_message "$AUTHORIZED_CHAT_ID" "Restart not configured on this host (SERVICE_RESTART_CMD not set)"
+      fi
+      ;;
+    "/reboot"|"reboot")
+      if [ "${ALLOW_REBOOT,,}" = "yes" ]; then
+        send_message "$AUTHORIZED_CHAT_ID" "Rebooting server now..."
+        (sleep 1; /sbin/shutdown -r now) >/dev/null 2>&1 &
+      else
+        send_message "$AUTHORIZED_CHAT_ID" "Reboot is disabled on this host (set ALLOW_REBOOT=yes to enable)"
+      fi
+      ;;
+    "/info"|"info")
+      IP=$(curl -s --max-time 5 https://ifconfig.me || echo "unknown")
+      UPTIME=$(uptime -p 2>/dev/null || echo "unknown")
+      send_message "$AUTHORIZED_CHAT_ID" "<b>Info</b>\nIP: ${IP}\nUptime: ${UPTIME}"
+      ;;
+    *)
+      send_message "$AUTHORIZED_CHAT_ID" "Unknown command: ${text}\nAvailable: update, users, info, restart, reboot"
+      ;;
+  esac
+
+  # advance offset
+  echo $((update_id + 1)) > "$LAST_ID_FILE"
+}
+
+main_loop() {
+  echo "$LOG_PREFIX starting polling loop (interval=${POLL_INTERVAL}s, timeout=${POLL_TIMEOUT}s)"
+  while true; do
+    OFFSET=$(cat "$LAST_ID_FILE" 2>/dev/null || echo 0)
+    RESP=$(curl -s --max-time $((POLL_TIMEOUT+5)) "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?timeout=${POLL_TIMEOUT}&offset=${OFFSET}")
+
+    # safe check for json
+    if ! echo "$RESP" | jq -e . >/dev/null 2>&1; then
+      echo "$LOG_PREFIX invalid response from Telegram, sleeping ${POLL_INTERVAL}s"
+      sleep "$POLL_INTERVAL"
       continue
     fi
 
-    echo "[bot_listener] got command from $chat_id: '$text'"
+    count=$(echo "$RESP" | jq '.result | length')
+    if [ "$count" -gt 0 ]; then
+      echo "$LOG_PREFIX received $count updates"
+      echo "$RESP" | jq -c '.result[]' | while read -r upd; do
+        process_update "$upd"
+      done
+    fi
 
-    case "${text,,}" in
-      "/update"|"update"|"/status"|"status")
-        /bin/bash "$(dirname "$0")/status.sh" || true
-        ;;
-      "/users"|"users")
-        # Provide a short users list
-        USERS=$(ss -ntu | grep ":443" || true)
-        if [ -z "$USERS" ]; then
-          SEND_TEXT="No active TCP connections on :443"
-        else
-          SEND_TEXT="Active connections on :443:\n$(echo "$USERS" | head -n 20)"
-        fi
-        curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" -d chat_id="${AUTHORIZED_CHAT_ID}" --data-urlencode "text=${SEND_TEXT}" >/dev/null 2>&1 || true
-        ;;
-      "/restart"|"restart")
-        if [ -n "$SERVICE_RESTART_CMD" ]; then
-          /bin/bash -c "$SERVICE_RESTART_CMD" >/dev/null 2>&1 && RESULT="Restart executed" || RESULT="Restart failed"
-        else
-          RESULT="No SERVICE_RESTART_CMD defined"
-        fi
-        curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" -d chat_id="${AUTHORIZED_CHAT_ID}" --data-urlencode "text=${RESULT}" >/dev/null 2>&1 || true
-        ;;
-      "/reboot"|"reboot")
-        # Reboot the server (requires proper privileges)
-        (sleep 1; /sbin/shutdown -r now) >/dev/null 2>&1 &
-        curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" -d chat_id="${AUTHORIZED_CHAT_ID}" --data-urlencode "text=Rebooting server..." >/dev/null 2>&1 || true
-        ;;
-      *)
-        # unknown command
-        curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" -d chat_id="${AUTHORIZED_CHAT_ID}" --data-urlencode "text=Unknown command: ${text}\nAvailable: update, users, restart, reboot" >/dev/null 2>&1 || true
-        ;;
-    esac
-
-    echo $((update_id+1)) > "$LAST_ID_FILE"
+    sleep "$POLL_INTERVAL"
   done
+}
 
-  # short sleep to avoid tight loop on some errors
-  sleep 1
-done
+# run
+main_loop

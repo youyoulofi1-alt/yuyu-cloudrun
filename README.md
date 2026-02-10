@@ -198,13 +198,20 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now bot-listener.service
 ```
 
+أو استخدم سكربت التثبيت التلقائي (أسهل):
+
+```bash
+# شغّل سكربت التثبيت كـ root
+sudo scripts/install_bot.sh
+```
+
 5. اختبار يدوياً:
 
 ```bash
-# أرسل حالة الآن
-sudo BOT_TOKEN="$BOT_TOKEN" CHAT_ID="$CHAT_ID" /usr/local/bin/status.sh
+# أرسل حالة الآن (مثال)
+sudo BOT_TOKEN="<BOT_TOKEN>" CHAT_ID="<CHAT_ID>" /usr/local/bin/status.sh
 # أو شغّل المستمع مؤقتًا (بدون systemd)
-sudo BOT_TOKEN="$BOT_TOKEN" CHAT_ID="$CHAT_ID" /usr/local/bin/bot_listener.sh
+sudo BOT_TOKEN="<BOT_TOKEN>" CHAT_ID="<CHAT_ID>" /usr/local/bin/bot_listener.sh
 ```
 
 أمان:
