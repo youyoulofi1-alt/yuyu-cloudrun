@@ -84,7 +84,12 @@ process_update() {
       else
         TOTAL=$(echo "$ALL_IPS" | wc -l | tr -d '[:space:]')
         TOP=$(echo "$ALL_IPS" | sort | uniq -c | sort -nr | awk '{print $2" ("$1")"}' | head -n 30)
-        SEND_TEXT="<b>Connections:</b> ${TOTAL}\n<b>Top IPs:</b>\n${TOP}"
+        SEND_TEXT=$(cat <<'EOF'
+<b>Connections:</b> ${TOTAL}
+<b>Top IPs:</b>
+${TOP}
+EOF
+)
         send_message "$AUTHORIZED_CHAT_ID" "$SEND_TEXT"
       fi
       ;;
@@ -110,10 +115,26 @@ process_update() {
     "/info"|"info")
       IP=$(curl -s --max-time 5 https://ifconfig.me || echo "unknown")
       UPTIME=$(uptime -p 2>/dev/null || echo "unknown")
-      send_message "$AUTHORIZED_CHAT_ID" "<b>Info</b>\nIP: ${IP}\nUptime: ${UPTIME}"
+      INFO_TXT=$(cat <<'EOF'
+<b>Info</b>
+IP: ${IP}
+Uptime: ${UPTIME}
+EOF
+)
+      send_message "$AUTHORIZED_CHAT_ID" "$INFO_TXT"
       ;;
     "/help"|"help")
-      HELP_TXT="Available commands:\n- update / status: send server status\n- users: list active connections\n- info: basic info (IP, uptime)\n- restart: restart configured service (if set)\n- reboot: reboot server (if enabled)\n\nYou can also use the keyboard buttons for quick actions."
+      HELP_TXT=$(cat <<'EOF'
+Available commands:
+- update / status: send server status
+- users: list active connections
+- info: basic info (IP, uptime)
+- restart: restart configured service (if set)
+- reboot: reboot server (if enabled)
+
+You can also use the keyboard buttons for quick actions.
+EOF
+)
       send_message "$AUTHORIZED_CHAT_ID" "$HELP_TXT"
       # send a quick reply keyboard
       REPLY_KEYS='{"keyboard":[["update","info","users"]],"one_time_keyboard":true,"resize_keyboard":true}'
@@ -124,7 +145,12 @@ process_update() {
       curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" -d chat_id="${AUTHORIZED_CHAT_ID}" --data-urlencode "text=Menu:" --data-urlencode "reply_markup=${REPLY_KEYS}" >/dev/null 2>&1 || true
       ;;
     *)
-      send_message "$AUTHORIZED_CHAT_ID" "Unknown command: ${text}\nAvailable: update, users, info, restart, reboot, help"
+      UNKNOWN_TXT=$(cat <<'EOF'
+Unknown command: ${text}
+Available: update, users, info, restart, reboot, help
+EOF
+)
+      send_message "$AUTHORIZED_CHAT_ID" "$UNKNOWN_TXT"
       ;;
   esac
 

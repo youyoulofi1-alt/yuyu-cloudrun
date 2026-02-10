@@ -181,13 +181,49 @@ func startHTTPServer(addr string) {
 		text := strings.TrimSpace(upd.Message.Text)
 		chatID := fmt.Sprintf("%d", upd.Message.Chat.ID)
 
+		// Welcome / start handler: send short hint to use /help or /menu
+		if strings.HasPrefix(text, "/start") {
+			welcome := "<b>Welcome</b>\nSend /help to see available commands or type /status to get server stats."
+			go func() {
+				if err := sendTelegramMessage(botToken, chatID, welcome); err != nil {
+					fmt.Printf("[Webhook] failed to send message: %v\n", err)
+				}
+			}()
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Help handler (explicit)
+		if strings.HasPrefix(text, "/help") {
+			help := "Available commands:\n- /status (or /count): send server status\n- /users: list active connections\n- /info: basic info (IP, uptime)\n- /restart: restart configured service (if set)\n- /reboot: reboot server (if enabled)\n\nYou can also use /menu to show quick buttons."
+			go func() {
+				if err := sendTelegramMessage(botToken, chatID, help); err != nil {
+					fmt.Printf("[Webhook] failed to send message: %v\n", err)
+				}
+			}()
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// If user sends plain text (no slash) reply with a hint to use /help
+		if !strings.HasPrefix(text, "/") && text != "" {
+			hint := "Send /help to see available commands or type /status for a quick server report."
+			go func() {
+				if err := sendTelegramMessage(botToken, chatID, hint); err != nil {
+					fmt.Printf("[Webhook] failed to send hint: %v\n", err)
+				}
+			}()
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		if strings.HasPrefix(text, "/count") || strings.HasPrefix(text, "/status") {
 			info, err := getXRAYStats(r.Context())
 			var msg string
 			if err != nil {
 				msg = fmt.Sprintf("Error getting stats: %v", err)
 			} else {
-				msg = fmt.Sprintf(`<b>📊 Server Stats</b>\n<b>Active Connections:</b> %d\n<b>Upload:</b> %s\n<b>Download:</b> %s\n<b>Total:</b> %s`,
+				msg = fmt.Sprintf("<b>📊 Server Stats</b>\n<b>Active Connections:</b> %d\n<b>Upload:</b> %s\n<b>Download:</b> %s\n<b>Total:</b> %s",
 					info.ActiveConnections,
 					formatTraffic(info.UploadTraffic),
 					formatTraffic(info.DownloadTraffic),
