@@ -186,11 +186,23 @@ SERVICE_RESTART_CMD="systemctl restart xray"
 ALLOW_REBOOT="no"
 # Polling interval بالثواني (الافتراضي 60)
 POLL_INTERVAL="60"
+# اختياري: فرض اسم عملية المستمع ليتم استخدامه عند عد الاتصالات
+# مثال: LISTENER_PROCESS="xray" أو "nginx"
+LISTENER_PROCESS=""
 ```
 
-> ملاحظة: أثناء التثبيت التفاعلي (`./install.sh`) سيُطلب منك إدخال `SERVICE_RESTART_CMD`, `ALLOW_REBOOT` و`POLL_INTERVAL` لتسهيل الإعداد.
+> ملاحظة: أثناء التثبيت التفاعلي (`./install.sh`) سيُطلب منك إدخال `SERVICE_RESTART_CMD`, `ALLOW_REBOOT`, `POLL_INTERVAL` و`LISTENER_PROCESS` لتسهيل الإعداد.
 
 يمكنك تعديل هذه القيم لاحقًا ثم إعادة تشغيل الخدمة:
+
+```bash
+# لتعيين يدويًا عند التشغيل السريع
+LISTENER_PROCESS=xray /usr/local/bin/status.sh
+
+# أو لتعديل الإعداد الدائم
+sudo edit /etc/default/yuyu_bot   # أضف أو غيّر LISTENER_PROCESS="xray"
+sudo systemctl restart bot-listener.service  # أو أعد تشغيل nohup process
+```
 
 ```bash
 sudo systemctl restart bot-listener.service

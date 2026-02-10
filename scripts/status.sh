@@ -27,11 +27,18 @@ UPTIME=$(uptime -p 2>/dev/null || echo "unknown")
 # Connected users: detect listener process on :443 and count ESTABLISHED sessions for that process, fallback to xray access log
 CONNECTED="0"
 LISTENER=""
+# Allow overriding detected listener via environment variable LISTENER_PROCESS
+if [ -n "${LISTENER_PROCESS:-}" ]; then
+  LISTENER="${LISTENER_PROCESS}"
+fi
+
 if command -v ss >/dev/null 2>&1; then
   # try to detect common listener names in ss output (nginx, haproxy, caddy, xray, traefik, envoy)
-  LIST_LINE=$(ss -ltnp '( sport = :443 )' 2>/dev/null | tail -n +2 | head -n1 || true)
-  if echo "$LIST_LINE" | grep -qiE 'nginx|haproxy|caddy|xray|traefik|envoy'; then
-    LISTENER=$(echo "$LIST_LINE" | grep -oEi 'nginx|haproxy|caddy|xray|traefik|envoy' | head -n1 | tr '[:upper:]' '[:lower:]')
+  if [ -z "$LISTENER" ]; then
+    LIST_LINE=$(ss -ltnp '( sport = :443 )' 2>/dev/null | tail -n +2 | head -n1 || true)
+    if echo "$LIST_LINE" | grep -qiE 'nginx|haproxy|caddy|xray|traefik|envoy'; then
+      LISTENER=$(echo "$LIST_LINE" | grep -oEi 'nginx|haproxy|caddy|xray|traefik|envoy' | head -n1 | tr '[:upper:]' '[:lower:]')
+    fi
   fi
 
   if [ -n "$LISTENER" ]; then

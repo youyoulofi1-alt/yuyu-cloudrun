@@ -195,6 +195,12 @@ install_telegram_bot() {
     read -rp "Optional: command to restart your service on 'restart' (e.g. systemctl restart xray) (press Enter to skip): " SERVICE_RESTART_CMD_VAL
   fi
 
+  # Optional: allow forcing the listener process name (e.g. xray, nginx) for connection counting
+  LISTENER_PROCESS_VAL=""
+  if [ "${INTERACTIVE}" = true ]; then
+    read -rp "Optional: listener process name to filter connections (e.g. xray, nginx) (press Enter to skip): " LISTENER_PROCESS_VAL
+  fi
+
   # Create the file using sudo tee to preserve root ownership
   run_as_root "cat > /etc/default/yuyu_bot <<'EOF'
 BOT_TOKEN=\"${BOT_TOKEN}\"
@@ -203,6 +209,8 @@ SERVICE_RESTART_CMD=\"${SERVICE_RESTART_CMD_VAL}\"
 # Optional controls:
 # ALLOW_REBOOT=yes to allow reboot command
 # POLL_INTERVAL=60 to change polling interval (seconds)
+# LISTENER_PROCESS=name  # if set, bot scripts will filter connections by this process name
+LISTENER_PROCESS=\"${LISTENER_PROCESS_VAL}\"
 EOF"
   run_as_root "chmod 600 /etc/default/yuyu_bot"
 
@@ -257,7 +265,11 @@ EOF"
       echo "To start at boot (crontab): sudo crontab -l | { cat; echo \"@reboot /usr/local/bin/run_bot_nohup.sh\"; } | sudo crontab -"
     fi
   fi
-
+  # If user provided a listener override, print an informative message
+  if [ -n "${LISTENER_PROCESS_VAL:-}" ]; then
+    echo "Listener process override set (LISTENER_PROCESS): ${LISTENER_PROCESS_VAL}"
+    echo "To change it later, edit /etc/default/yuyu_bot and restart the bot listener (systemctl restart bot-listener.service or restart the nohup process)."
+  fi
   echo "Installation finished. Logs: sudo journalctl -u bot-listener.service -f (if systemd available) or tail -f /var/log/yuyu_bot.log"
 }
 
