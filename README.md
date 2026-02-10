@@ -272,10 +272,3 @@ sudo BOT_TOKEN="<BOT_TOKEN>" CHAT_ID="<CHAT_ID>" /usr/local/bin/status.sh
 # أو شغّل المستمع مؤقتًا (بدون systemd)
 sudo BOT_TOKEN="<BOT_TOKEN>" CHAT_ID="<CHAT_ID>" /usr/local/bin/bot_listener.sh
 ```
-
-أمان:
-
-- لا تقم بنشر `BOT_TOKEN` علنًا. إذا تسرب التوكن، أعد إصداره عبر @BotFather فورًا.
-- يُوصى تشغيل `bot_listener.sh` كخدمة واحدة على الخادم لتجنّب استلام التحديثات مكررة.
-
-هل تريد أن أضبط السكربتات لتدعم مزايا إضافية (أزرار، تحقق إضافي، تفصيل اتصالات UUID)؟
