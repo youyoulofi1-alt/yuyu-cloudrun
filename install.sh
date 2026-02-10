@@ -170,6 +170,110 @@ send_telegram() {
     > /dev/null 2>&1
 }
 
+# Optional: install Telegram bot listener on this host (copies scripts, installs jq, systemd service)
+install_telegram_bot() {
+  # helper to run as root
+  run_as_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+      sudo bash -c "$*"
+    else
+      bash -c "$*"
+    fi
+  }
+
+  echo "🔧 Installing Telegram bot listener..."
+
+  # Copy scripts
+  run_as_root "install -d /usr/local/bin && cp -v \"${PWD}/scripts/status.sh\" \"${PWD}/scripts/bot_listener.sh\" /usr/local/bin/"
+  run_as_root "chmod +x /usr/local/bin/status.sh /usr/local/bin/bot_listener.sh"
+
+  # Create environment file (safe permissions)
+  echo "Writing /etc/default/yuyu_bot (permissions 600)..."
+  # if user wants a restart command, ask interactively
+  SERVICE_RESTART_CMD_VAL=""
+  if [ "${INTERACTIVE}" = true ]; then
+    read -rp "Optional: command to restart your service on 'restart' (e.g. systemctl restart xray) (press Enter to skip): " SERVICE_RESTART_CMD_VAL
+  fi
+
+  # Create the file using sudo tee to preserve root ownership
+  run_as_root "cat > /etc/default/yuyu_bot <<'EOF'
+BOT_TOKEN=\"${BOT_TOKEN}\"
+CHAT_ID=\"${CHAT_ID}\"
+SERVICE_RESTART_CMD=\"${SERVICE_RESTART_CMD_VAL}\"
+# Optional controls:
+# ALLOW_REBOOT=yes to allow reboot command
+# POLL_INTERVAL=60 to change polling interval (seconds)
+EOF"
+  run_as_root "chmod 600 /etc/default/yuyu_bot"
+
+  # Ensure jq is installed
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "Installing jq..."
+    if command -v apt-get >/dev/null 2>&1; then
+      run_as_root "apt-get update && apt-get install -y jq"
+    elif command -v yum >/dev/null 2>&1; then
+      run_as_root "yum install -y epel-release && yum install -y jq"
+    elif command -v apk >/dev/null 2>&1; then
+      run_as_root "apk add --no-cache jq"
+    else
+      echo "Could not detect package manager. Please install 'jq' manually."
+    fi
+  fi
+
+  # Install systemd service if possible
+  run_as_root "cp -v \"${PWD}/systemd/bot-listener.service\" /etc/systemd/system/bot-listener.service || true"
+
+  if command -v systemctl >/dev/null 2>&1 && [ "$(ps -o comm=1)" = "systemd" ]; then
+    echo "Enabling and starting systemd service..."
+    run_as_root "systemctl daemon-reload || true"
+    if run_as_root "systemctl enable --now bot-listener.service"; then
+      echo "Service enabled and started: systemctl status bot-listener.service"
+    else
+      echo "Failed to start service via systemctl. You may need to start it manually later."
+    fi
+  else
+    echo "Note: systemd not available on this host (or not PID 1). Service file installed but not started."
+    echo "Installing lightweight helper scripts for non-systemd environments (/usr/local/bin/run_bot_nohup.sh and /usr/local/bin/stop_bot_nohup.sh)"
+    run_as_root "cp -v \"${PWD}/scripts/run_bot_nohup.sh\" /usr/local/bin/ || true"
+    run_as_root "cp -v \"${PWD}/scripts/stop_bot_nohup.sh\" /usr/local/bin/ || true"
+    run_as_root "chmod +x /usr/local/bin/run_bot_nohup.sh /usr/local/bin/stop_bot_nohup.sh || true"
+    run_as_root "mkdir -p /var/log && touch /var/log/yuyu_bot.log && chown root:root /var/log/yuyu_bot.log || true"
+
+    if [ "${INTERACTIVE}" = true ]; then
+      read -rp "Do you want to start the bot now in background via nohup? [y/N]: " START_NOHUP
+    else
+      START_NOHUP="n"
+    fi
+
+    if [[ "${START_NOHUP,,}" = "y" ]]; then
+      echo "Starting bot via /usr/local/bin/run_bot_nohup.sh (logs -> /var/log/yuyu_bot.log)"
+      run_as_root "BOT_TOKEN=\"${BOT_TOKEN}\" CHAT_ID=\"${CHAT_ID}\" /usr/local/bin/run_bot_nohup.sh"
+      echo "Started via nohup; stop: sudo /usr/local/bin/stop_bot_nohup.sh"
+      echo "To enable auto-start at boot (if supported) you can add to root crontab: @reboot /usr/local/bin/run_bot_nohup.sh"
+    else
+      echo "To start later (manual):"
+      echo "  sudo BOT_TOKEN=\"<BOT_TOKEN>\" CHAT_ID=\"<CHAT_ID>\" /usr/local/bin/run_bot_nohup.sh"
+      echo "To stop: sudo /usr/local/bin/stop_bot_nohup.sh"
+      echo "To start at boot (crontab): sudo crontab -l | { cat; echo \"@reboot /usr/local/bin/run_bot_nohup.sh\"; } | sudo crontab -"
+    fi
+  fi
+
+  echo "Installation finished. Logs: sudo journalctl -u bot-listener.service -f (if systemd available) or tail -f /var/log/yuyu_bot.log"
+}
+
+# If user provided BOT_TOKEN and CHAT_ID during interactive install, ask to install bot listener
+if [ -n "${BOT_TOKEN:-}" ] && [ -n "${CHAT_ID:-}" ]; then
+  if [ "${INTERACTIVE}" = true ]; then
+    read -rp "Do you want to install Telegram bot listener on this host now? [y/N]: " INSTALL_BOT_ANSWER
+  else
+    INSTALL_BOT_ANSWER="n"
+  fi
+  INSTALL_BOT_ANSWER="${INSTALL_BOT_ANSWER:-n}"
+  if [[ "${INSTALL_BOT_ANSWER,,}" = "y" ]]; then
+    install_telegram_bot
+  fi
+fi
+
 # -------- Protocol --------
 if [ "${INTERACTIVE}" = true ] && [ -z "${PROTO_CHOICE:-}" ]; then
   echo ""

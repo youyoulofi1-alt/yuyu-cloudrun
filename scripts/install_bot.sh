@@ -56,8 +56,40 @@ fi
 echo "Installing systemd service..."
 cp -v systemd/bot-listener.service "${SERVICE_FILE}"
 
-systemctl daemon-reload
-systemctl enable --now bot-listener.service
+# Prefer systemd when available
+if command -v systemctl >/dev/null 2>&1 && [ "$(ps -o comm=1)" = "systemd" ]; then
+  echo "systemd detected. Enabling service..."
+  systemctl daemon-reload || true
+  if systemctl enable --now bot-listener.service; then
+    echo "Service enabled and started: systemctl status bot-listener.service"
+  else
+    echo "Failed to start service via systemctl. You may need to start it manually later."
+  fi
+else
+  echo "Note: systemd not available on this host (or not PID 1). Installing nohup helpers..."
+  cp -v scripts/run_bot_nohup.sh scripts/stop_bot_nohup.sh "${INSTALL_PATH}/" || true
+  chmod +x "${INSTALL_PATH}/run_bot_nohup.sh" "${INSTALL_PATH}/stop_bot_nohup.sh" || true
+  run_as_root "mkdir -p /var/log && touch /var/log/yuyu_bot.log && chown root:root /var/log/yuyu_bot.log || true"
+
+  if [ "${INTERACTIVE:-false}" = true ]; then
+    read -rp "Do you want to start the bot now in background via nohup? [y/N]: " START_NOHUP
+  else
+    START_NOHUP="n"
+  fi
+  START_NOHUP="${START_NOHUP:-n}"
+
+  if [[ "${START_NOHUP,,}" = "y" ]]; then
+    echo "Starting bot via /usr/local/bin/run_bot_nohup.sh (logs -> /var/log/yuyu_bot.log)"
+    /usr/local/bin/run_bot_nohup.sh || true
+    echo "Started via nohup; stop: sudo /usr/local/bin/stop_bot_nohup.sh"
+    echo "To enable auto-start at boot (if supported) you can add to root crontab: @reboot /usr/local/bin/run_bot_nohup.sh"
+  else
+    echo "To start later (manual):"
+    echo "  sudo /usr/local/bin/run_bot_nohup.sh"
+    echo "To stop: sudo /usr/local/bin/stop_bot_nohup.sh"
+    echo "To start at boot (crontab): sudo crontab -l | { cat; echo \"@reboot /usr/local/bin/run_bot_nohup.sh\"; } | sudo crontab -"
+  fi
+fi
 
 echo "\nInstallation complete."
 echo "Check service status: systemctl status bot-listener.service" 

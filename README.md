@@ -153,7 +153,10 @@ Memory: 2048MB | CPU: 2 | Instances: 8 | Concurrency: 1000
 هذا المشروع يتضمن سكربتات Bash لاستخدام Bot Telegram عبر polling (بدون webhook). الميزات الأساسية:
 
 - إرسال حالة السيرفر (`status.sh`) إلى `CHAT_ID` المحدد
-- الاستماع لأوامر (`bot_listener.sh`) عبر `getUpdates` (commands: `update`, `users`, `restart`, `reboot`)
+- الاستماع لأوامر (`bot_listener.sh`) عبر `getUpdates` (commands: `update`, `status`, `users`, `info`, `help`, `menu`)
+- دعم aliases للأخطاء الشائعة (مثلاً: `user` → `users`, `state` → `status`)
+- أمر `users` مُحسّن: يعرض عدد الاتصالات وأفضل العناوين IP مع عدد الاتصالات (يقرأ من `ss` و`/var/log/xray/access.log` إن وجد)
+- إمكانية إرسال زر لوحة الرد (Reply keyboard) للاختصار (`update`, `info`, `users`)
 - إمكانية تشغيل المستمع كخدمة systemd باستخدام ملف القالب `systemd/bot-listener.service`
 
 الملفات المضافة:
@@ -171,7 +174,7 @@ sudo cp scripts/status.sh scripts/bot_listener.sh /usr/local/bin/
 sudo chmod +x /usr/local/bin/status.sh /usr/local/bin/bot_listener.sh
 ```
 
-2. أنشئ ملف البيئة `/etc/default/yuyu_bot` وضع فيه:
+2. أنشئ ملف البيئة `/etc/default/yuyu_bot` وضع فيه (يمكن ضبطها أيضاً خلال `install.sh` التفاعلي):
 
 ```bash
 # /etc/default/yuyu_bot
@@ -179,7 +182,21 @@ BOT_TOKEN="put_bot_token_here"
 CHAT_ID="CHATI_D"
 # اختياري: أمر لإعادة تشغيل الخدمة التي تريدها عند استقبال restart
 SERVICE_RESTART_CMD="systemctl restart xray"
+# اختياري: السماح بتنفيذ أمر reboot من البوت (yes/ no)
+ALLOW_REBOOT="no"
+# Polling interval بالثواني (الافتراضي 60)
+POLL_INTERVAL="60"
 ```
+
+> ملاحظة: أثناء التثبيت التفاعلي (`./install.sh`) سيُطلب منك إدخال `SERVICE_RESTART_CMD`, `ALLOW_REBOOT` و`POLL_INTERVAL` لتسهيل الإعداد.
+
+يمكنك تعديل هذه القيم لاحقًا ثم إعادة تشغيل الخدمة:
+
+```bash
+sudo systemctl restart bot-listener.service
+```
+
+إذا كان النظام لا يستخدم systemd، أعد تشغيل العملية يدوياً (مثلاً بإعادة تشغيل الأمر مع `nohup` أو داخل `tmux`).
 
 3. تثبيت jq إذا لم يكن مثبتًا:
 
@@ -204,6 +221,30 @@ sudo systemctl enable --now bot-listener.service
 # شغّل سكربت التثبيت كـ root
 sudo scripts/install_bot.sh
 ```
+
+إذا كان النظام لا يستخدم systemd (مثل Cloud Shell أو بعض الحاويات)، سيقوم سكربت التثبيت بتثبيت سكربتات مساعدة لتشغيل المستمع في الخلفية باستخدام `nohup` (`/usr/local/bin/run_bot_nohup.sh` و `/usr/local/bin/stop_bot_nohup.sh`). أمثلة استخدام:
+
+```bash
+# بدء المستمع الآن (يقرأ /etc/default/yuyu_bot)
+sudo /usr/local/bin/run_bot_nohup.sh
+# إيقاف المستمع
+sudo /usr/local/bin/stop_bot_nohup.sh
+# عرض السجلات
+tail -f /var/log/yuyu_bot.log
+```
+
+نصيحة: لتشغيل المستمع تلقائيًا عند إقلاع النظام (إن دعم بيئتك crontab @reboot) أضف الإدخال التالي إلى crontab الجذر:
+
+```bash
+# إضافة @reboot إلى crontab الجذر
+sudo crontab -l 2>/dev/null | { cat; echo "@reboot /usr/local/bin/run_bot_nohup.sh"; } | sudo crontab -
+```
+
+ملاحظات مهمة:
+
+- يقرأ `run_bot_nohup.sh` الملف `/etc/default/yuyu_bot` للحصول على `BOT_TOKEN` و`CHAT_ID`، لذا تأكد من وجود القيم فيه وأن الملف محفوظ بصلاحيات مقيدة (600).
+- إذا كان بدء الخدمات يعتمد على ترتيب معين في نظامك، ضع في crontab سطرًا يقترن بـ `sleep` أو استخدم ملف تغليف يتأكد من توفر الخدمات المطلوبة قبل تشغيل البوت.
+- أثناء التثبيت التفاعلي، يقدّم `install_bot.sh` خيارًا لبدء المستمع تلقائيًا إذا لم يكن systemd متاحًا؛ يمكنك رفض البدء الفوري واختيار إضافة `@reboot` للتشغيل التلقائي على الخادم دون تدخل.
 
 5. اختبار يدوياً:
 

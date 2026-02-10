@@ -59,18 +59,34 @@ process_update() {
 
   echo "$LOG_PREFIX got command from $chat_id: '$text'"
 
-  case "${text,,}" in
+  # normalize command text and add common aliases
+  cmd="${text,,}"
+  # strip surrounding spaces
+  cmd="$(echo "$cmd" | sed -e 's/^ *//' -e 's/ *$//')"
+  # map common typos/aliases
+  case "$cmd" in
+    "state"|"states") cmd="status" ;;
+    "user" ) cmd="users" ;;
+  esac
+
+  case "$cmd" in
     "/update"|"update"|"/status"|"status")
       /bin/bash "$(dirname "$0")/status.sh" || true
       ;;
     "/users"|"users")
-      USERS=$(ss -ntu | grep ":443" || true)
-      if [ -z "$USERS" ]; then
+      # gather IPs from ss and xray access.log (if exists), count occurrences
+      CONN_IPS=$(ss -ntu 2>/dev/null | awk '{print $5}' | sed -E 's/\[[^]]+\]://g' | sed -E 's/:.*$//g' | grep -E '^[0-9]+' || true)
+      LOG_IPS=$(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' /var/log/xray/access.log 2>/dev/null || true)
+      ALL_IPS=$(printf "%s\n%s\n" "$CONN_IPS" "$LOG_IPS" | sed '/^$/d')
+      if [ -z "$ALL_IPS" ]; then
         SEND_TEXT="No active TCP connections on :443"
+        send_message "$AUTHORIZED_CHAT_ID" "$SEND_TEXT"
       else
-        SEND_TEXT="Active connections on :443:\n$(echo "$USERS" | head -n 30)"
+        TOTAL=$(echo "$ALL_IPS" | wc -l | tr -d '[:space:]')
+        TOP=$(echo "$ALL_IPS" | sort | uniq -c | sort -nr | awk '{print $2" ("$1")"}' | head -n 30)
+        SEND_TEXT="<b>Connections:</b> ${TOTAL}\n<b>Top IPs:</b>\n${TOP}"
+        send_message "$AUTHORIZED_CHAT_ID" "$SEND_TEXT"
       fi
-      send_message "$AUTHORIZED_CHAT_ID" "$SEND_TEXT"
       ;;
     "/restart"|"restart")
       if [ -n "$SERVICE_RESTART_CMD" ]; then
@@ -96,8 +112,19 @@ process_update() {
       UPTIME=$(uptime -p 2>/dev/null || echo "unknown")
       send_message "$AUTHORIZED_CHAT_ID" "<b>Info</b>\nIP: ${IP}\nUptime: ${UPTIME}"
       ;;
+    "/help"|"help")
+      HELP_TXT="Available commands:\n- update / status: send server status\n- users: list active connections\n- info: basic info (IP, uptime)\n- restart: restart configured service (if set)\n- reboot: reboot server (if enabled)\n\nYou can also use the keyboard buttons for quick actions."
+      send_message "$AUTHORIZED_CHAT_ID" "$HELP_TXT"
+      # send a quick reply keyboard
+      REPLY_KEYS='{"keyboard":[["update","info","users"]],"one_time_keyboard":true,"resize_keyboard":true}'
+      curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" -d chat_id="${AUTHORIZED_CHAT_ID}" --data-urlencode "text=Choose an action:" --data-urlencode "reply_markup=${REPLY_KEYS}" >/dev/null 2>&1 || true
+      ;;
+    "/menu"|"menu")
+      REPLY_KEYS='{"keyboard":[["update","info","users"]],"one_time_keyboard":true,"resize_keyboard":true}'
+      curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" -d chat_id="${AUTHORIZED_CHAT_ID}" --data-urlencode "text=Menu:" --data-urlencode "reply_markup=${REPLY_KEYS}" >/dev/null 2>&1 || true
+      ;;
     *)
-      send_message "$AUTHORIZED_CHAT_ID" "Unknown command: ${text}\nAvailable: update, users, info, restart, reboot"
+      send_message "$AUTHORIZED_CHAT_ID" "Unknown command: ${text}\nAvailable: update, users, info, restart, reboot, help"
       ;;
   esac
 
