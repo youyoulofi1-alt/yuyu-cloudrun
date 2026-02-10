@@ -84,7 +84,7 @@ process_update() {
       else
         TOTAL=$(echo "$ALL_IPS" | wc -l | tr -d '[:space:]')
         TOP=$(echo "$ALL_IPS" | sort | uniq -c | sort -nr | awk '{print $2" ("$1")"}' | head -n 30)
-        SEND_TEXT=$(cat <<'EOF'
+        SEND_TEXT=$(cat <<EOF
 <b>Connections:</b> ${TOTAL}
 <b>Top IPs:</b>
 ${TOP}
@@ -115,7 +115,7 @@ EOF
     "/info"|"info")
       IP=$(curl -s --max-time 5 https://ifconfig.me || echo "unknown")
       UPTIME=$(uptime -p 2>/dev/null || echo "unknown")
-      INFO_TXT=$(cat <<'EOF'
+      INFO_TXT=$(cat <<EOF
 <b>Info</b>
 IP: ${IP}
 Uptime: ${UPTIME}
@@ -124,7 +124,7 @@ EOF
       send_message "$AUTHORIZED_CHAT_ID" "$INFO_TXT"
       ;;
     "/help"|"help")
-      HELP_TXT=$(cat <<'EOF'
+      HELP_TXT=$(cat <<EOF
 Available commands:
 - update / status: send server status
 - users: list active connections
@@ -145,7 +145,7 @@ EOF
       curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" -d chat_id="${AUTHORIZED_CHAT_ID}" --data-urlencode "text=Menu:" --data-urlencode "reply_markup=${REPLY_KEYS}" >/dev/null 2>&1 || true
       ;;
     *)
-      UNKNOWN_TXT=$(cat <<'EOF'
+      UNKNOWN_TXT=$(cat <<EOF
 Unknown command: ${text}
 Available: update, users, info, restart, reboot, help
 EOF
