@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,6 +31,8 @@ type ConnectionInfo struct {
 	UploadTraffic     int64 `json:"upload_bytes"`
 	DownloadTraffic   int64 `json:"download_bytes"`
 	TotalTraffic      int64 `json:"total_bytes"`
+	// ActiveUsersApprox counts users with traffic increase since last check (best-effort)
+	ActiveUsersApprox int64 `json:"active_users_approx"`
 }
 
 // getTelegramEnv gets telegram credentials from environment
@@ -38,6 +41,18 @@ func getTelegramEnv() (botToken, chatID string, shouldMonitor bool) {
 	chatID = os.Getenv("CHAT_ID")
 	shouldMonitor = botToken != "" && chatID != ""
 	return
+}
+
+// internal per-user counters snapshot for delta-based active user estimation
+var (
+	lastUserSnapMu sync.Mutex
+	lastUserSnap   = map[string]UserStats{}
+	lastSnapAt     time.Time
+)
+
+type UserStats struct {
+	Uplink   int64
+	Downlink int64
 }
 
 // getXRAYStats retrieves connection statistics from XRAY API
@@ -73,9 +88,43 @@ func getXRAYStats(ctx context.Context) (*ConnectionInfo, error) {
 
 	info := &ConnectionInfo{}
 	var sr StatsResponse
+	// current per-user snapshot
+	curUser := map[string]UserStats{}
 	if err := json.Unmarshal(respBytes, &sr); err == nil {
+		// Debug: print raw response and parsed stats if debugging enabled
+		if os.Getenv("XRAY_STATS_DEBUG") == "1" {
+			fmt.Printf("[XRAY_STATS_DEBUG] raw response: %s\n", string(respBytes))
+			fmt.Println("[XRAY_STATS_DEBUG] parsed stats:")
+			for _, st := range sr.Stat {
+				fmt.Printf("  %s = %d\n", st.Name, st.Value)
+			}
+		}
+
 		for _, st := range sr.Stat {
 			name := strings.ToLower(st.Name)
+			// collect per-user uplink/downlink if stat name matches pattern
+			if strings.Contains(name, "user") && strings.Contains(name, "uplink") {
+				parts := strings.Split(st.Name, ">>>")
+				if len(parts) >= 3 {
+					id := parts[1]
+					u := curUser[id]
+					u.Uplink += st.Value
+					curUser[id] = u
+				}
+				info.UploadTraffic += st.Value
+				continue
+			}
+			if strings.Contains(name, "user") && strings.Contains(name, "downlink") {
+				parts := strings.Split(st.Name, ">>>")
+				if len(parts) >= 3 {
+					id := parts[1]
+					u := curUser[id]
+					u.Downlink += st.Value
+					curUser[id] = u
+				}
+				info.DownloadTraffic += st.Value
+				continue
+			}
 			if strings.Contains(name, "connection") {
 				info.ActiveConnections += st.Value
 			}
@@ -87,6 +136,34 @@ func getXRAYStats(ctx context.Context) (*ConnectionInfo, error) {
 			}
 		}
 		info.TotalTraffic = info.UploadTraffic + info.DownloadTraffic
+
+		// Estimate active users by comparing per-user counters with last snapshot
+		activeApprox := int64(0)
+		lastUserSnapMu.Lock()
+		if !lastSnapAt.IsZero() {
+			for id, s := range curUser {
+				prev := lastUserSnap[id]
+				if (s.Uplink+ s.Downlink) - (prev.Uplink + prev.Downlink) > 0 {
+					activeApprox++
+				}
+			}
+		}
+		// update snapshot
+		lastUserSnap = curUser
+		lastSnapAt = time.Now()
+		lastUserSnapMu.Unlock()
+		info.ActiveUsersApprox = activeApprox
+
+		if os.Getenv("XRAY_STATS_DEBUG") == "1" {
+			fmt.Printf("[XRAY_STATS_DEBUG] active_users_approx=%d\n", activeApprox)
+			// show top users by traffic this interval
+			if len(curUser) > 0 {
+				fmt.Println("[XRAY_STATS_DEBUG] per-user (uplink/downlink):")
+				for id, s := range curUser {
+					fmt.Printf("  %s -> up=%d down=%d\n", id, s.Uplink, s.Downlink)
+				}
+			}
+		}
 		return info, nil
 	}
 
@@ -124,6 +201,11 @@ func getXRAYStats(ctx context.Context) (*ConnectionInfo, error) {
 	info.UploadTraffic = up
 	info.DownloadTraffic = down
 	info.TotalTraffic = up + down
+	// Debug: print fallback parsed values and raw response when debugging enabled
+	if os.Getenv("XRAY_STATS_DEBUG") == "1" {
+		fmt.Printf("[XRAY_STATS_DEBUG] raw response (fallback parse): %s\n", string(respBytes))
+		fmt.Printf("[XRAY_STATS_DEBUG] parsed fallback -> active=%d up=%d down=%d\n", active, up, down)
+	}
 	return info, nil
 }
 

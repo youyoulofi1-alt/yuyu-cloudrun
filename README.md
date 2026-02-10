@@ -165,6 +165,12 @@ Memory: 2048MB | CPU: 2 | Instances: 8 | Concurrency: 1000
 - `scripts/bot_listener.sh` — يستعلم `getUpdates` ويستجيب للأوامر
 - `systemd/bot-listener.service` — قالب خدمة systemd
 
+Xray stats and active users (notes):
+
+- هذا المشروع يدعم قراءة إحصاءات Xray عبر **StatsService** (بورت `127.0.0.1:10085`) - تأكد من تفعيل `"api": {"services":["StatsService"]}` و `"stats": {}` في `config.json` (موجود افتراضيًا في `config.json.tpl`).
+- وضع القياس الجديد **ActiveUsersApprox** يعتمد على مقارنة counters لكل مستخدم بين فترات استعلام متتالية (delta). هذا يعطي "تقدير" لعدد المستخدمين النشطين خلال الفترة السابقة (أفضل من الاعتماد على اتصالات TCP فقط، ومناسب لبيئات مثل Cloud Run).
+- للتشخيص، يمكن تفعيل طباعة التصحيح في السجلات عبر متغير البيئة: `XRAY_STATS_DEBUG=1`، سيطبع الاستجابة الخام من Xray ومقاييس كل مستخدم وكذلك الـ delta المستنتجة.
+
 التثبيت السريع:
 
 1. انسخ السكربتات إلى `/usr/local/bin` ومنحها صلاحيات تنفيذ:
