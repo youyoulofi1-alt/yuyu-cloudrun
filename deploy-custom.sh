@@ -17,8 +17,8 @@ fi
 
 # -------- Preset Configurations --------
 declare -A PRESETS=(
-  [production]="memory=2048|cpu=1|instances=16|concurrency=1000|timeout=3600"
-  [budget]="memory=2048|cpu=2|instances=8|concurrency=1000|timeout=3600"
+  [production]="memory=2048|cpu=1|instances=16|concurrency=1000|timeout=1800"
+  [budget]="memory=2048|cpu=2|instances=8|concurrency=1000|timeout=1800"
 )
 
 apply_preset() {

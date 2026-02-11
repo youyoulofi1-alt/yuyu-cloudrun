@@ -19,8 +19,8 @@ echo "=========================================="
 
 # -------- Preset Configurations --------
 declare -A PRESETS=(
-  [production]="memory=2048|cpu=1|instances=16|concurrency=60|timeout=3600"
-  [budget]="memory=2048|cpu=1|instances=16|concurrency=60|timeout=3600"
+  [production]="memory=2048|cpu=1|instances=16|concurrency=1000|timeout=1800"
+  [budget]="memory=2048|cpu=1|instances=16|concurrency=1000|timeout=1800"
 )
 
 apply_preset() {
@@ -78,7 +78,7 @@ show_regions() {
 if [ "${INTERACTIVE}" = true ] && [ -z "${PRESET:-}" ]; then
   echo ""
   echo "⚡ Quick Start with Presets:"
-  echo "1) production (2048MB, 1 CPU, 16 instances, 60 concurrency)"
+  echo "1) production (2048MB, 1 CPU, 16 instances, 1000 concurrency)"
   echo "2) custom (configure everything manually)"
   read -rp "Select preset [1-2] (default: 1): " PRESET_CHOICE
 fi
